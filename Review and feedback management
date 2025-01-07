@@ -1,0 +1,591 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+#include <algorithm>
+#include <conio.h>
+
+using namespace std;
+
+enum ReviewStatus { PENDING, IN_PROGRESS, COMPLETED, REJECTED };
+enum UserRole { ADMIN, REVIEWER, SUBMITTER, GUEST };
+
+class User {
+private:
+    string username;
+    string password;
+    UserRole role;
+    bool isActive;
+
+public:
+    User(string uname, string pwd, UserRole r)
+        : username(uname), password(pwd), role(r), isActive(true) {}
+
+    string toString() {
+        return username + "|" + password + "|" + to_string(role) + "|" + to_string(isActive);
+    }
+
+    static User fromString(const string& str) {
+        stringstream ss(str);
+        string username, password, roleStr, activeStr;
+        getline(ss, username, '|');
+        getline(ss, password, '|');
+        getline(ss, roleStr, '|');
+        getline(ss, activeStr, '|');
+        return User(username, password, static_cast<UserRole>(stoi(roleStr)));
+    }
+
+    string getUsername() { return username; }
+    UserRole getRole() { return role; }
+    bool authenticate(string pwd) { return password == pwd && isActive; }
+
+    string getPassword() {
+        return string(password.length(), '*');  // Return password as asterisks
+    }
+};
+
+class Review {
+private:
+    string title;
+    string description;
+    string author;
+    string assignee;
+    ReviewStatus status;
+    vector<string> comments;
+    vector<string> feedback;
+    vector<pair<string, int>> ratings;
+    double averageRating;
+
+public:
+    Review(string t, string desc, string auth)
+        : title(t), description(desc), author(auth), status(PENDING), averageRating(0.0) {}
+
+    string toString() {
+        stringstream ss;
+        ss << title << "|" << description << "|" << author << "|" << assignee << "|" << status << "\n";
+        ss << comments.size() << "\n";
+        for(const auto& comment : comments) ss << comment << "\n";
+        ss << feedback.size() << "\n";
+        for(const auto& fb : feedback) ss << fb << "\n";
+        ss << ratings.size() << "\n";
+        for(const auto& rating : ratings) {
+            ss << rating.first << "|" << rating.second << "\n";
+        }
+        return ss.str();
+    }
+
+    static Review fromString(stringstream& ss) {
+        string title, description, author, assignee, statusStr;
+        string line;
+        getline(ss, line);
+        stringstream headerSS(line);
+        getline(headerSS, title, '|');
+        getline(headerSS, description, '|');
+        getline(headerSS, author, '|');
+        getline(headerSS, assignee, '|');
+        getline(headerSS, statusStr, '|');
+
+        Review review(title, description, author);
+        review.assignee = assignee;
+        review.status = static_cast<ReviewStatus>(stoi(statusStr));
+
+        int count;
+        getline(ss, line);
+        count = stoi(line);
+        for(int i = 0; i < count; i++) {
+            getline(ss, line);
+            review.comments.push_back(line);
+        }
+
+        getline(ss, line);
+        count = stoi(line);
+        for(int i = 0; i < count; i++) {
+            getline(ss, line);
+            review.feedback.push_back(line);
+        }
+
+        getline(ss, line);
+        count = stoi(line);
+        for(int i = 0; i < count; i++) {
+            getline(ss, line);
+            stringstream ratingSS(line);
+            string username, ratingStr;
+            getline(ratingSS, username, '|');
+            getline(ratingSS, ratingStr, '|');
+            review.ratings.push_back({username, stoi(ratingStr)});
+        }
+        review.updateAverageRating();
+        return review;
+    }
+
+    void addRating(string username, int rating) {
+        if(rating < 1 || rating > 5) {
+            throw runtime_error("Rating must be between 1 and 5");
+        }
+        bool found = false;
+        for(auto& r : ratings) {
+            if(r.first == username) {
+                r.second = rating;
+                found = true;
+                break;
+            }
+        }
+        if(!found) {
+            ratings.push_back({username, rating});
+        }
+        updateAverageRating();
+    }
+
+    void updateAverageRating() {
+        if(ratings.empty()) {
+            averageRating = 0.0;
+            return;
+        }
+        double sum = 0;
+        for(const auto& rating : ratings) {
+            sum += rating.second;
+        }
+        averageRating = sum / ratings.size();
+    }
+
+    void addComment(string comment) {
+        comments.push_back(comment);
+    }
+
+    void addFeedback(int feedbackChoice) {
+        string feedbackStr;
+        switch(feedbackChoice) {
+            case 1: feedbackStr = "Excellent"; break;
+            case 2: feedbackStr = "Very Good"; break;
+            case 3: feedbackStr = "Good"; break;
+            case 4: feedbackStr = "Average"; break;
+            case 5: feedbackStr = "Bad"; break;
+            default: feedbackStr = "Invalid"; break;
+        }
+        feedback.push_back(feedbackStr);
+    }
+
+    void assignTo(string reviewer) {
+        assignee = reviewer;
+        status = IN_PROGRESS;
+    }
+
+    void complete() {
+        status = COMPLETED;
+    }
+
+    void edit(string newTitle, string newDescription) {
+        title = newTitle;
+        description = newDescription;
+    }
+
+    void displayReview() {
+        cout << "\nReview Title: " << title;
+        cout << "\nDescription: " << description;
+        cout << "\nAuthor: " << author;
+        cout << "\nAssigned to: " << (assignee.empty() ? "Not assigned" : assignee);
+        cout << "\nAverage Rating: " << (averageRating == 0 ? "No ratings yet" : to_string(averageRating));
+        cout << "\nStatus: ";
+        switch(status) {
+            case PENDING: cout << "Pending"; break;
+            case IN_PROGRESS: cout << "In Progress"; break;
+            case COMPLETED: cout << "Completed"; break;
+            case REJECTED: cout << "Rejected"; break;
+        }
+
+        cout << "\n\nRatings:";
+        if(ratings.empty()) {
+            cout << "\nNo ratings yet.";
+        } else {
+            for(const auto& rating : ratings) {
+                cout << "\n- " << rating.first << ": " << rating.second << "/5";
+            }
+        }
+
+        cout << "\n\nComments:";
+        if(comments.empty()) {
+            cout << "\nNo comments yet.";
+        } else {
+            for(const string& comment : comments) {
+                cout << "\n- " << comment;
+            }
+        }
+
+        cout << "\n\nFeedback Items:";
+        if(feedback.empty()) {
+            cout << "\nNo feedback yet.";
+        } else {
+            for(const string& fb : feedback) {
+                cout << "\n- " << fb;
+            }
+        }
+        cout << "\n";
+    }
+
+    string getTitle() { return title; }
+    ReviewStatus getStatus() { return status; }
+    double getAverageRating() { return averageRating; }  // Add getter for averageRating
+};
+
+class ReviewSystem {
+private:
+    vector<User> users;
+    vector<Review> reviews;
+    User* currentUser;
+    string dataFile;
+
+    void saveData() {
+        ofstream file(dataFile);
+        file << users.size() << "\n";
+        for(auto& user : users) {
+            file << user.toString() << "\n";
+        }
+        file << reviews.size() << "\n";
+        for(auto& review : reviews) {
+            file << review.toString();
+        }
+    }
+
+    void loadData() {
+        ifstream file(dataFile);
+        if(!file.is_open()) return;
+
+        string line;
+        getline(file, line);
+        int userCount = stoi(line);
+
+        users.clear();
+        for(int i = 0; i < userCount; i++) {
+            getline(file, line);
+            users.push_back(User::fromString(line));
+        }
+
+        getline(file, line);
+        int reviewCount = stoi(line);
+
+        reviews.clear();
+        stringstream ss;
+        for(int i = 0; i < reviewCount; i++) {
+            string reviewData;
+            while(getline(file, line)) {
+                ss << line << "\n";
+            }
+            if(!ss.str().empty()) {
+                reviews.push_back(Review::fromString(ss));
+            }
+        }
+    }
+
+public:
+    ReviewSystem() : currentUser(nullptr) {
+        dataFile = "review_system.txt";
+        loadData();
+        if(users.empty()) {
+            users.push_back(User("admin", "admin123", ADMIN));
+            saveData();
+        }
+    }
+
+    void registerUser(string username, string password, UserRole role) {
+        users.push_back(User(username, password, role));
+        saveData();
+        cout << "\nUser registered successfully!\n";
+    }
+
+    bool login(string username, string password) {
+        for(auto& user : users) {
+            if(user.getUsername() == username && user.authenticate(password)) {
+                currentUser = &user;
+                cout << "\nLogged in successfully as " << username << "\n";
+                return true;
+            }
+        }
+        cout << "\nLogin failed. Invalid username or password.\n";
+        return false;
+    }
+
+    void createReview(string title, string description) {
+        if(!currentUser || currentUser->getRole() == GUEST) {
+            cout << "\nPlease login first!\n";
+            return;
+        }
+        reviews.push_back(Review(title, description, currentUser->getUsername()));
+        saveData();
+        cout << "\nReview created successfully!\n";
+    }
+
+    void editReview(int reviewIndex, string newTitle, string newDescription) {
+        if(!currentUser || currentUser->getRole() == GUEST) {
+            cout << "\nPlease login first!\n";
+            return;
+        }
+        if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+            cout << "\nInvalid review number!\n";
+            return;
+        }
+        reviews[reviewIndex - 1].edit(newTitle, newDescription);
+        saveData();
+        cout << "\nReview updated successfully!\n";
+    }
+
+    void deleteReview(int reviewIndex) {
+        if(!currentUser) {
+            cout << "\nPlease login first!\n";
+            return;
+        }
+
+        string username, password;
+        cout << "\nEnter username: ";
+        cin >> username;
+        cout << "Enter password: ";
+        cin >> password;
+
+        if (currentUser->getUsername() == username && currentUser->authenticate(password)) {
+            if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+                cout << "\nInvalid review number!\n";
+                return;
+            }
+            reviews.erase(reviews.begin() + (reviewIndex - 1));
+            saveData();
+            cout << "\nReview deleted successfully!\n";
+        } else {
+            cout << "\nAuthentication failed. Deletion not allowed.\n";
+        }
+    }
+
+    void listReviews() {
+        if(reviews.empty()) {
+            cout << "\nNo reviews available.\n";
+            return;
+        }
+
+        cout << "\nAvailable Reviews:\n";
+        for(int i = 0; i < reviews.size(); i++) {
+            cout << i + 1 << ". " << reviews[i].getTitle() << " (Status: ";
+            switch(reviews[i].getStatus()) {
+                case PENDING: cout << "Pending"; break;
+                case IN_PROGRESS: cout << "In Progress"; break;
+                case COMPLETED: cout << "Completed"; break;
+                case REJECTED: cout << "Rejected"; break;
+            }
+            cout << ")\n";
+        }
+    }
+
+    void viewReview(int index) {
+        if(index <= 0 || index > reviews.size()) {
+            cout << "\nInvalid review index.\n";
+            return;
+        }
+        reviews[index - 1].displayReview();
+    }
+
+    void addRating(int reviewIndex, int rating) {
+        if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+            cout << "\nInvalid review index.\n";
+            return;
+        }
+        if(currentUser->getRole() == GUEST) {
+            cout << "\nGuests cannot rate reviews.\n";
+            return;
+        }
+        reviews[reviewIndex - 1].addRating(currentUser->getUsername(), rating);
+        saveData();
+        cout << "\nRating added successfully!\n";
+    }
+
+    void addFeedback(int reviewIndex) {
+        if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+            cout << "\nInvalid review index.\n";
+            return;
+        }
+
+        int feedbackChoice;
+        cout << "\nSelect feedback option:";
+        cout << "\n1. Excellent\n2. Very Good\n3. Good\n4. Average\n5. Bad\n";
+        cout << "Enter your choice: ";
+        cin >> feedbackChoice;
+
+        reviews[reviewIndex - 1].addFeedback(feedbackChoice);
+        saveData();
+        cout << "\nFeedback added successfully!\n";
+    }
+
+    void assignReview(int reviewIndex, string reviewer) {
+        if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+            cout << "\nInvalid review index.\n";
+            return;
+        }
+        if(currentUser->getRole() == GUEST) {
+            cout << "\nGuests cannot assign reviews.\n";
+            return;
+        }
+        reviews[reviewIndex - 1].assignTo(reviewer);
+        saveData();
+        cout << "\nReview assigned successfully!\n";
+    }
+
+    void completeReview(int reviewIndex) {
+        if(reviewIndex <= 0 || reviewIndex > reviews.size()) {
+            cout << "\nInvalid review index.\n";
+            return;
+        }
+        reviews[reviewIndex - 1].complete();
+        saveData();
+        cout << "\nReview marked as completed!\n";
+    }
+
+    // Function to filter reviews by rating
+    void searchReviewsByRating(int minRating) {
+        if(minRating < 1 || minRating > 5) {
+            cout << "\nInvalid rating.\n";
+            return;
+        }
+        cout << "\nReviews with rating greater than or equal to " << minRating << ":\n";
+        for(int i = 0; i < reviews.size(); i++) {
+            if(reviews[i].getAverageRating() >= minRating) {
+                cout << i + 1 << ". " << reviews[i].getTitle() << " (Rating: " << reviews[i].getAverageRating() << ")\n";
+            }
+        }
+    }
+
+    // Logout function to reset the currentUser
+    void logout() {
+        currentUser = nullptr;
+        cout << "\nLogged out successfully.\n";
+    }
+};
+
+// Function to get the password input and mask it with '*'
+string getPasswordInput() {
+    string password = "";
+    char ch;
+    while (true) {
+        ch = _getch();  // _getch() reads one character from user input
+        if (ch == 13) {  // If Enter is pressed, exit loop
+            break;
+        } else if (ch == 8) {  // Backspace to delete
+            if (!password.empty()) {
+                password.pop_back();
+                cout << "\b \b";  // Erase last character on screen
+            }
+        } else {
+            password.push_back(ch);
+            cout << "*";  // Display * for each character typed
+        }
+    }
+    cout << endl;
+    return password;
+}
+
+int main() {
+    ReviewSystem reviewSystem;
+    int choice;
+
+    do {
+        cout << "\nMenu:\n";
+        cout << "1. Register User\n";
+        cout << "2. Login\n";
+        cout << "3. Create Review\n";
+        cout << "4. Edit Review\n";
+        cout << "5. Delete Review\n";
+        cout << "6. List Reviews\n";
+        cout << "7. View Review\n";
+        cout << "8. Add Rating\n";
+        cout << "9. Add Feedback\n";
+        cout << "10. Search Reviews by Rating\n";
+        cout << "11. Logout\n";
+        cout << "Enter your choice: ";
+        cin >> choice;
+
+        int reviewIndex, rating, feedbackChoice, minRating;
+        string username, password, title, description;
+        switch(choice) {
+            case 1:
+                cout << "\nEnter username: ";
+                cin >> username;
+                cout << "Enter password: ";
+                password = getPasswordInput();  // Use masked password input
+                reviewSystem.registerUser(username, password, REVIEWER);
+                break;
+
+            case 2:
+                cout << "\nEnter username: ";
+                cin >> username;
+                cout << "Enter password: ";
+                password = getPasswordInput();  // Use masked password input
+                reviewSystem.login(username, password);
+                break;
+
+            case 3:
+                cout << "\nEnter review number to rate: ";
+                cin >> reviewIndex;
+                cout << "\nEnter review title: ";
+                cin.ignore();
+                getline(cin, title);
+                cout << "Enter review description: ";
+                getline(cin, description);
+                reviewSystem.createReview(title, description);
+                break;
+
+            case 4:
+                cout << "\nEnter review number to edit: ";
+                cin >> reviewIndex;
+                cout << "Enter new title: ";
+                cin.ignore();
+                getline(cin, title);
+                cout << "Enter new description: ";
+                getline(cin, description);
+                reviewSystem.editReview(reviewIndex, title, description);
+                break;
+
+            case 5:
+                cout << "\nEnter review number to delete: ";
+                cin >> reviewIndex;
+                reviewSystem.deleteReview(reviewIndex);
+                break;
+
+            case 6:
+                reviewSystem.listReviews();
+                break;
+
+            case 7:
+                cout << "\nEnter review number to view: ";
+                cin >> reviewIndex;
+                reviewSystem.viewReview(reviewIndex);
+                break;
+
+            case 8:
+                cout << "\nEnter review number to rate: ";
+                cin >> reviewIndex;
+                cout << "Enter rating (1-5): ";
+                cin >> rating;
+                reviewSystem.addRating(reviewIndex, rating);
+                break;
+
+            case 9:
+                cout << "\nEnter review number to add feedback: ";
+                cin >> reviewIndex;
+                reviewSystem.addFeedback(reviewIndex);
+                break;
+
+            case 10:
+                cout << "\nEnter minimum rating (1-5): ";
+                cin >> minRating;
+                reviewSystem.searchReviewsByRating(minRating);
+                break;
+
+            case 11:
+                reviewSystem.logout();
+                break;
+
+            default:
+                cout << "\nInvalid choice, try again.\n";
+                break;
+        }
+    } while (choice != 11);
+
+    return 0;
+}
